@@ -2,11 +2,23 @@
 
 #include "BoardActor.h"
 #include "CubeBlockActor.h"
+#include "BoardTrigger.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "Components/SceneComponent.h"
 
 ABoardActor::ABoardActor()
 {
     PrimaryActorTick.bCanEverTick = true;
+
+    // Create root component
+    SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
+    RootComponent = SceneRoot;
+
+    // Create trigger component
+    TriggerComponent = CreateDefaultSubobject<UBoardTrigger>(TEXT("BoardTrigger"));
+    TriggerComponent->SetupAttachment(RootComponent);
+    TriggerComponent->SetBoxExtent(FVector(400.f, 400.f, 400.f));
 }
 
 void ABoardActor::BeginPlay()
@@ -25,6 +37,28 @@ void ABoardActor::BeginPlay()
     // Spawn initial piece so you see something immediately
     Logic->StepFall();
     RefreshActiveCubeVisual();
+
+    // Set trigger to reference this board
+    if (TriggerComponent && bUseTriggerBox)
+    {
+        TriggerComponent->BoardActor = this;
+        // Position trigger at center of the board
+        FVector TriggerPos = FVector(Width * CellSize / 2.f, 0.f, -Height * CellSize / 2.f);
+        TriggerComponent->SetRelativeLocation(TriggerPos);
+        UE_LOG(LogTemp, Warning, TEXT("BoardTrigger positioned at: %s"), *TriggerPos.ToString());
+    }
+    else if (TriggerComponent && !bUseTriggerBox)
+    {
+        // Disable trigger if not using it
+        TriggerComponent->SetGenerateOverlapEvents(false);
+        TriggerComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    }
+
+    // Auto-enable input if configured
+    if (bAutoEnableInput)
+    {
+        EnableMinigameInput();
+    }
 }
 
 void ABoardActor::Tick(float DeltaSeconds)
@@ -63,6 +97,57 @@ void ABoardActor::Tick(float DeltaSeconds)
             UE_LOG(LogTemp, Warning, TEXT("Board: Puzzle completed, stopping game!"));
         }
     }
+}
+
+void ABoardActor::EnableMinigameInput()
+{
+    if (bInputEnabled) return;
+
+    APlayerController* PC = GetWorld()->GetFirstPlayerController();
+    if (!PC)
+    {
+        UE_LOG(LogTemp, Error, TEXT("BoardActor: Failed to enable input - no PlayerController found"));
+        return;
+    }
+
+    EnableInput(PC);
+    bInputEnabled = true;
+
+    // Bind input actions
+    InputComponent->BindKey(EKeys::A, IE_Pressed, this, &ABoardActor::MoveLeft);
+    InputComponent->BindKey(EKeys::D, IE_Pressed, this, &ABoardActor::MoveRight);
+    InputComponent->BindKey(EKeys::Left, IE_Pressed, this, &ABoardActor::MoveLeft);
+    InputComponent->BindKey(EKeys::Right, IE_Pressed, this, &ABoardActor::MoveRight);
+
+    OnMinigameActivated();
+    UE_LOG(LogTemp, Warning, TEXT("BoardActor: Input enabled"));
+}
+
+void ABoardActor::DisableMinigameInput()
+{
+    if (!bInputEnabled) return;
+
+    APlayerController* PC = GetWorld()->GetFirstPlayerController();
+    if (PC)
+    {
+        DisableInput(PC);
+    }
+
+    bInputEnabled = false;
+    OnMinigameDeactivated();
+    UE_LOG(LogTemp, Warning, TEXT("BoardActor: Input disabled"));
+}
+
+void ABoardActor::MoveLeft()
+{
+    if (!bInputEnabled) return;
+    InputMove(-1);
+}
+
+void ABoardActor::MoveRight()
+{
+    if (!bInputEnabled) return;
+    InputMove(1);
 }
 
 FVector ABoardActor::CellToWorld(int32 X, int32 Y) const
